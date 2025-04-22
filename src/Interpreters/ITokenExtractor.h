@@ -4,6 +4,7 @@
 
 #include <Interpreters/BloomFilter.h>
 #include <Interpreters/GinFilter.h>
+#include "Common/Tokenizer/ChineseTokenizer.h"
 
 namespace DB
 {
@@ -12,6 +13,8 @@ namespace DB
 struct ITokenExtractor
 {
     virtual ~ITokenExtractor() = default;
+
+    virtual std::vector<std::string> getTokens(const char* data, size_t length) const = 0;
 
     /// Fast inplace implementation for regular use.
     /// Gets string (data ptr and len) and start position for extracting next token (state of extractor).
@@ -114,12 +117,18 @@ class ITokenExtractorHelper : public ITokenExtractor
     {
         gin_filter.setQueryString(data, length);
 
+#if 0
         size_t cur = 0;
         size_t token_start = 0;
         size_t token_len = 0;
 
         while (cur < length && static_cast<const Derived *>(this)->nextInString(data, length, &cur, &token_start, &token_len))
             gin_filter.addTerm(data + token_start, token_len);
+#else
+        const auto & tokens{static_cast<const Derived *>(this)->getTokens(data, length)};
+        for (const auto & token : tokens)
+            gin_filter.addTerm(token.data(), token.length());
+#endif
     }
 
     void stringPaddedToGinFilter(const char * data, size_t length, GinFilter & gin_filter) const override
@@ -154,6 +163,8 @@ struct NgramTokenExtractor final : public ITokenExtractorHelper<NgramTokenExtrac
 
     static const char * getName() { return "ngrambf_v1"; }
 
+    std::vector<std::string> getTokens(const char* data, size_t length) const override;
+
     bool nextInString(const char * data, size_t length, size_t *  __restrict pos, size_t * __restrict token_start, size_t * __restrict token_length) const override;
 
     bool nextInStringLike(const char * data, size_t length, size_t * pos, String & token) const override;
@@ -170,6 +181,8 @@ struct SplitTokenExtractor final : public ITokenExtractorHelper<SplitTokenExtrac
 {
     static const char * getName() { return "tokenbf_v1"; }
 
+    std::vector<std::string> getTokens(const char* data, size_t length) const override;
+
     bool nextInString(const char * data, size_t length, size_t * __restrict pos, size_t * __restrict token_start, size_t * __restrict token_length) const override;
 
     bool nextInStringPadded(const char * data, size_t length, size_t * __restrict pos, size_t * __restrict token_start, size_t * __restrict token_length) const override;
@@ -179,8 +192,42 @@ struct SplitTokenExtractor final : public ITokenExtractorHelper<SplitTokenExtrac
     void substringToBloomFilter(const char * data, size_t length, BloomFilter & bloom_filter, bool is_prefix, bool is_suffix) const override;
 
     void substringToGinFilter(const char * data, size_t length, GinFilter & gin_filter, bool is_prefix, bool is_suffix) const override;
+};
 
+/// Parser extracting tokens (sequences of numbers and ascii letters).
+struct ChineseTokenExtractor final : public ITokenExtractorHelper<ChineseTokenExtractor>
+{
+    static const char * getName() { return "chinese_v1"; }
 
+    std::vector<std::string> getTokens(const char* data, size_t length) const override;
+
+    bool nextInString(const char * data, size_t length, size_t *  __restrict pos, size_t * __restrict token_start, size_t * __restrict token_length) const override;
+
+    bool nextInStringLike(const char * data, size_t length, size_t * pos, String & token) const override;
+};
+
+/// Parser extracting tokens (sequences of numbers and ascii letters).
+struct NoneTokenExtractor final : public ITokenExtractorHelper<NoneTokenExtractor>
+{
+    static const char * getName() { return "none_v1"; }
+
+    std::vector<std::string> getTokens(const char* data, size_t length) const override {
+        std::vector<std::string> tokens{};
+        tokens.emplace_back(data, length);
+        return tokens;
+    }
+
+    bool nextInString([[maybe_unused]] const char * data, size_t length, size_t *  __restrict pos, size_t * __restrict token_start, size_t * __restrict token_length) const override {
+        if (*pos != 0) {
+            return false;
+        }
+        *token_start = 0;
+        *token_length = length;
+        *pos += length;
+        return true;
+    }
+
+    bool nextInStringLike(const char * data, size_t length, size_t * pos, String & token) const override;
 };
 
 }

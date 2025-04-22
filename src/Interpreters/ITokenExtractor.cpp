@@ -2,9 +2,9 @@
 
 #include <boost/algorithm/string.hpp>
 
+#include "Common/Tokenizer/ChineseTokenizer.h"
 #include <Common/StringUtils.h>
 #include <Common/UTF8Helpers.h>
-#include <bit>
 
 #if defined(__SSE2__)
 #include <emmintrin.h>
@@ -268,6 +268,144 @@ void SplitTokenExtractor::substringToGinFilter(const char * data, size_t length,
         // last token is ignored, unless substring is suffix
         if ((token_start > 0 || is_prefix) && (token_start + token_len < length || is_suffix))
             gin_filter.addTerm(data + token_start, token_len);
+}
+
+std::vector<std::string> NgramTokenExtractor::getTokens(const char* data, [[maybe_unused]] size_t length) const {
+    std::vector<std::string> tokens{};
+    tokens.reserve(length - n + 1);
+
+    size_t cur = 0;
+    size_t token_start = 0;
+    size_t token_len = 0;
+
+    while (cur < length && nextInStringPadded(data, length, &cur, &token_start, &token_len))
+        tokens.emplace_back(data + token_start, token_len);
+
+    return tokens;
+}
+
+std::vector<std::string> SplitTokenExtractor::getTokens(const char* data, [[maybe_unused]] size_t length) const {
+    std::vector<std::string> tokens{};
+    tokens.reserve(length / 5 /* assuming average length of word is 5. */);
+
+    size_t cur = 0;
+    size_t token_start = 0;
+    size_t token_len = 0;
+
+    while (cur < length && nextInStringPadded(data, length, &cur, &token_start, &token_len))
+        tokens.emplace_back(data + token_start, token_len);
+
+    return tokens;
+}
+
+std::vector<std::string> ChineseTokenExtractor::getTokens(const char* data, [[maybe_unused]] size_t length) const {
+    return ChineseTokenizer::instance().tokenize(data);
+}
+
+bool ChineseTokenExtractor::nextInString(
+    [[maybe_unused]] const char * data,
+    [[maybe_unused]] size_t length,
+    [[maybe_unused]] size_t * __restrict pos,
+    [[maybe_unused]] size_t * __restrict token_start,
+    [[maybe_unused]] size_t * __restrict token_length) const
+{
+    return false;
+}
+
+bool ChineseTokenExtractor::nextInStringLike(const char * data, size_t length, size_t * pos, String & token) const
+{
+    token.clear();
+
+    size_t code_points = 0;
+    bool escaped = false;
+    for (size_t i = *pos; i < length;)
+    {
+        if (escaped && (data[i] == '%' || data[i] == '_' || data[i] == '\\'))
+        {
+            token += data[i];
+            ++code_points;
+            escaped = false;
+            ++i;
+        }
+        else if (!escaped && (data[i] == '%' || data[i] == '_'))
+        {
+            /// This token is too small, go to the next.
+            token.clear();
+            code_points = 0;
+            escaped = false;
+            *pos = ++i;
+        }
+        else if (!escaped && data[i] == '\\')
+        {
+            escaped = true;
+            ++i;
+        }
+        else
+        {
+            const size_t sz = UTF8::seqLength(static_cast<UInt8>(data[i]));
+            for (size_t j = 0; j < sz; ++j)
+                token += data[i + j];
+            i += sz;
+            ++code_points;
+            escaped = false;
+        }
+
+        if (code_points == 15)
+        {
+            *pos += UTF8::seqLength(static_cast<UInt8>(data[*pos]));
+            return true;
+        }
+    }
+
+    return false;
+}
+
+bool NoneTokenExtractor::nextInStringLike(const char * data, size_t length, size_t * pos, String & token) const
+{
+    token.clear();
+
+    size_t code_points = 0;
+    bool escaped = false;
+    for (size_t i = *pos; i < length;)
+    {
+        if (escaped && (data[i] == '%' || data[i] == '_' || data[i] == '\\'))
+        {
+            token += data[i];
+            ++code_points;
+            escaped = false;
+            ++i;
+        }
+        else if (!escaped && (data[i] == '%' || data[i] == '_'))
+        {
+            /// This token is too small, go to the next.
+            token.clear();
+            code_points = 0;
+            escaped = false;
+            *pos = ++i;
+        }
+        else if (!escaped && data[i] == '\\')
+        {
+            escaped = true;
+            ++i;
+        }
+        else
+        {
+            const size_t sz = UTF8::seqLength(static_cast<UInt8>(data[i]));
+            for (size_t j = 0; j < sz; ++j)
+                token += data[i + j];
+            i += sz;
+            ++code_points;
+            escaped = false;
+        }
+
+        if (code_points == 15)
+        {
+            *pos += UTF8::seqLength(static_cast<UInt8>(data[*pos]));
+            return true;
+        }
+    }
+
+    return false;
 }
 
 }
