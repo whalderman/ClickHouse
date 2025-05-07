@@ -39,8 +39,6 @@ RUN apt-get update -y \
             mysql-client=8.0* \
             ncdu \
             netcat-openbsd \
-            nodejs \
-            npm \
             odbcinst \
             openjdk-11-jre-headless \
             openssl \
@@ -67,7 +65,11 @@ RUN apt-get update -y \
             ripgrep \
             gnuplot \
             imagemagick \
-            parallel \
+            parallel
+
+# Install Node.js 20 from NodeSource (azurite 3.34 fails with 24)
+RUN curl -fsSL https://deb.nodesource.com/setup_20.x | bash - \
+    && apt-get install -y --no-install-recommends nodejs \
     && apt-get clean \
     && rm -rf /var/lib/apt/lists/* /var/cache/debconf /tmp/*
 
@@ -114,12 +116,11 @@ RUN chmod 777 /home
 ENV HOME="/home"
 
 RUN npm install -g azurite@3.34.0 \
-    && npm install -g tslib && npm install -g node
+    && npm install -g tslib
 
 ENV PYTHONPATH=".:./ci"
 
-# FIX stress and upgrade job scripts to work with not root user in docker
-#USER clickhouse
+USER clickhouse
 
 # A directory for cache
 RUN mkdir /dev/shm/clickhouse

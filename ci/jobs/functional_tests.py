@@ -154,7 +154,7 @@ def main():
             and CH.start_minio(test_type="stateless", log_file_path=minio_log)
             and CH.start_azurite(log_file_path=azurite_log)
         )
-        logs_to_attach += [minio_log]
+        logs_to_attach += [minio_log, azurite_log]
         time.sleep(10)
         Shell.check("ps -ef | grep minio", verbose=True)
         res = res and Shell.check(
